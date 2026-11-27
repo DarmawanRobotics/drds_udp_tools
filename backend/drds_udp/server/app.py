@@ -186,8 +186,7 @@ async def _start_mock(kwargs: dict):
     try:
         await robot.start()
     except OSError as exc:
-        await robot.stop()  # close whatever did bind
-        print(f"  ! built-in mock not started: {exc} — is `ezra-udp mock` already running?", flush=True)
+        print(f"  ! built-in mock robot not started: {exc.strerror or exc}", flush=True)
         return None
     ports = ", ".join(f"{k.upper()} {v}" for k, v in robot.bound.items())
     print(f"  Mock robot: {robot.host} — {ports}  (pick a Mock preset in the GUI)", flush=True)

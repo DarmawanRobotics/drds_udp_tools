@@ -861,6 +861,8 @@ Cetak bab ini. Isi \ok{} / \no{} dan catatan.
 \endhead
 \code{make setup}: ``Need Python $\geq$ 3.10'' & \code{brew install python@3.13}, lalu ulangi.\\
 GUI: ``Backend is not running'' & Jalankan \code{make serve} / \code{make run}; halaman tersambung ulang sendiri.\\
+``\emph{port 8765 is already in use}'' & EZRA sudah jalan di terminal lain: buka \code{http://127.0.0.1:8765}, atau hentikan yang lama (Ctrl+C).\\
+``\emph{mock robot not started: \ldots{} already in use}'' & Mock lain masih jalan (\code{make demo} / \code{make mock}). Preset Mock tetap bisa dipakai dengan mock itu, atau hentikan dulu.\\
 \code{ping} gagal & IP Mac bukan di \code{10.21.33.x}, kabel/adapter salah, atau Wi-Fi robot belum tersambung (Tahap 1).\\
 Probe \code{unreachable} & Tidak ada rute: cek \code{route -n get 10.21.33.103}, kosongkan router di adapter LAN.\\
 Semua \code{refused} & robotserver belum jalan, atau IP salah (mis. kamu ping host lain).\\

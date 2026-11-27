@@ -3,9 +3,12 @@
 import asyncio
 import socket
 
+import pytest
+
 from drds_udp.engine import SendSpec, Session, SessionConfig
 from drds_udp.engine.probe import probe
-from drds_udp.mock import MockRobot
+from drds_udp.cli import main as cli_main
+from drds_udp.mock import MockRobot, PortBusyError
 from drds_udp.transport import TlsOptions, TransportConfig, TransportError
 
 
@@ -112,3 +115,52 @@ def test_link_watchdog_reports_loss_and_recovery():
             await s.disconnect()
 
     asyncio.run(main())
+
+
+async def _busy_port_case(kind: str) -> None:
+    stype = socket.SOCK_DGRAM if kind in ("udp", "dtls") else socket.SOCK_STREAM
+    taken = socket.socket(socket.AF_INET, stype)
+    taken.bind(("127.0.0.1", 0))
+    if stype == socket.SOCK_STREAM:
+        taken.listen()
+    port = taken.getsockname()[1]
+    robot = _mock(**{f"{kind}_port": port})
+    try:
+        await robot.start()
+    except PortBusyError as exc:
+        msg = exc.strerror
+    else:
+        await robot.stop()
+        raise AssertionError("start() should fail on a busy port")
+    finally:
+        taken.close()
+    assert f"{kind.upper()} port {port}" in msg and "already in use" in msg
+    # ports bound before the failure are released again
+    for other, bound in robot.bound.items():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM if other in ("udp", "dtls") else socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", bound))
+        s.close()
+
+
+@pytest.mark.parametrize("kind", ["udp", "tls"])
+@pytest.mark.parametrize("loop", ["asyncio", "uvloop"])
+def test_mock_names_the_busy_port_and_releases_the_rest(kind, loop):
+    if loop == "uvloop":  # what `ezra-udp serve --mock` runs on (uvicorn picks uvloop when installed)
+        uvloop = pytest.importorskip("uvloop")
+        uvloop.run(_busy_port_case(kind))
+    else:
+        asyncio.run(_busy_port_case(kind))
+
+
+def test_serve_refuses_a_busy_port(capsys):
+    taken = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    port = taken.getsockname()[1]
+    try:
+        rc = cli_main(["serve", "--no-web", "--port", str(port)])
+    finally:
+        taken.close()
+    assert rc == 1
+    assert f"port {port} is already in use" in capsys.readouterr().err

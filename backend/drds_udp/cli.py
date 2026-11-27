@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import json
 import sys
 import time
@@ -258,7 +259,23 @@ def cmd_mock(a) -> int:
                              loss=a.loss, verbose=not a.quiet))
     except KeyboardInterrupt:
         pass
+    except OSError as exc:
+        print(f"✗ mock robot not started: {exc.strerror or exc}", file=sys.stderr)
+        return 1
     return 0
+
+
+def _tcp_port_busy(host: str, port: int) -> bool:
+    import socket
+
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
+    return False
 
 
 def cmd_serve(a) -> int:
@@ -266,6 +283,10 @@ def cmd_serve(a) -> int:
 
     from .server import create_app, default_web_dir
 
+    if _tcp_port_busy(a.host, a.port):
+        print(f"✗ port {a.port} is already in use — EZRA UDP Debugger is probably running already: open "
+              f"http://127.0.0.1:{a.port}, stop the other one (Ctrl+C), or use --port {a.port + 1}", file=sys.stderr)
+        return 1
     web = None if a.no_web else (Path(a.web) if a.web else default_web_dir())
     mock = None
     if a.mock or a.mock_faults:
@@ -273,7 +294,8 @@ def cmd_serve(a) -> int:
     app = create_app(web, mock=mock)
     url = f"http://{'127.0.0.1' if a.host in ('0.0.0.0', '::') else a.host}:{a.port}"
     print(f"EZRA UDP Debugger {__version__}  →  {url}")
-    print(f"  GUI: {web if web else 'not built (cd web && npm run build) — API only'}")
+    gui = web or ("off (--no-web) — API only" if a.no_web else "not built (cd web && npm run build) — API only")
+    print(f"  GUI: {gui}")
     if a.open:
         webbrowser.open(url)
     uvicorn.run(app, host=a.host, port=a.port, log_level=a.log_level, ws_ping_interval=20)
