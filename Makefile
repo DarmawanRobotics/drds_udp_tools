@@ -5,7 +5,7 @@ PY      ?= $(shell for p in python3.14 python3.13 python3.12 python3.11 python3.
 VENV    := .venv
 BIN     := $(VENV)/bin
 
-.PHONY: help setup build run demo serve mock probe dev test clean
+.PHONY: help setup build run demo serve mock probe dev test manual clean
 
 help: ## show targets
 	@grep -E '^[a-z]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -43,6 +43,9 @@ dev: ## backend :8765 + Next.js dev server :3000 (hot reload)
 test: ## backend tests + TypeScript check
 	cd backend && ../$(BIN)/pytest -q
 	cd web && npm run typecheck
+
+manual: ## rebuild the PDF manual in docs/manual (needs xelatex + Carlito font)
+	cd docs/manual && latexmk -xelatex -interaction=nonstopmode -halt-on-error ezra-udp-debugger-manual.tex
 
 clean: ## remove build output
 	rm -rf web/.next web/out backend/*.egg-info
