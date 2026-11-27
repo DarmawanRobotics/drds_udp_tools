@@ -2,7 +2,7 @@ PY      ?= python3
 VENV    := .venv
 BIN     := $(VENV)/bin
 
-.PHONY: help setup build run serve mock dev test clean
+.PHONY: help setup build run demo serve mock dev test clean
 
 help: ## show targets
 	@grep -E '^[a-z]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -18,6 +18,9 @@ build: ## build the GUI into web/out
 
 run: build ## build + serve API and GUI on http://127.0.0.1:8765
 	$(BIN)/ezra-udp serve --open
+
+demo: build ## build + serve GUI with a built-in mock robot (one terminal, no robot needed)
+	$(BIN)/ezra-udp serve --mock-faults --open
 
 serve: ## serve without rebuilding
 	$(BIN)/ezra-udp serve
