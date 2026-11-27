@@ -2,6 +2,9 @@
   <img src="assets/ezra-banner.svg" alt="EZRA Robotics — UDP Debugger" width="100%">
 </p>
 
+[![CI](https://github.com/DarmawanRobotics/drds_udp_tools/actions/workflows/ci.yml/badge.svg)](https://github.com/DarmawanRobotics/drds_udp_tools/actions/workflows/ci.yml)
+[![Manual](https://github.com/DarmawanRobotics/drds_udp_tools/actions/workflows/manual.yml/badge.svg)](docs/manual/ezra-udp-debugger-manual.pdf)
+
 **EZRA UDP Debugger** is a Postman-style tool for the Deep Robotics **Inspection Communication Protocol
 V1.0.3** — the UDP/TCP (DTLS/TLS) interface robots like the Lynx S10 expose on `10.21.33.103`.
 Send every documented command, watch the five status reports live, and run a conformance check that
@@ -32,6 +35,13 @@ make demo           # = ezra-udp serve --mock-faults --open  (mock on UDP 30000 
 ```
 
 `make mock` still runs the mock on its own, e.g. to hit it from the CLI or from another machine.
+
+Before heading to a robot, check the whole stack in one go (GUI + API + mock robot over all four transports,
+about 5 s, no robot needed):
+
+```bash
+make smoke          # must end with "smoke test passed"
+```
 
 Without `make`:
 
@@ -100,20 +110,30 @@ ezra-udp serve --mock                             # GUI + API + mock robot in on
 ## Development
 
 ```bash
-make dev    # backend on :8765 + Next.js dev server with hot reload on :3000
-make test   # pytest (codec + end-to-end over UDP/DTLS/TCP/TLS against the mock) + TypeScript check
+make dev     # backend on :8765 + Next.js dev server with hot reload on :3000
+make test    # pytest (codec + end-to-end over UDP/DTLS/TCP/TLS against the mock) + TypeScript check
+make smoke   # build the GUI, then drive `serve --mock` over HTTP like the browser does (scripts/smoke.py)
+make manual  # rebuild docs/manual/ezra-udp-debugger-manual.pdf (XeLaTeX + Carlito font)
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every push and pull request: pytest on Ubuntu and macOS with
+Python 3.10 and 3.13, the CLI against the mock robot (`probe` plus a conformance run on every transport),
+the GUI build + typecheck, and `scripts/smoke.py --gui`. `manual.yml` rebuilds the PDF whenever
+`docs/manual/` changes and uploads it as an artifact.
 
 ```
 backend/drds_udp/
   protocol/   header (APDU), asdu (JSON/XML), codes (error/fault/nav tables), catalog (all messages)
   transport/  udp, dtls (pyOpenSSL memory BIO), stream (tcp/tls framing)
-  engine/     session (msg ids, heartbeat, reply matching, streams, stop/E-STOP), reassembly, suite
-  server/     FastAPI REST + WebSocket, serves web/out
+  engine/     session (msg ids, heartbeat, reply matching, link watchdog, streams, stop/E-STOP),
+              reassembly, suite, probe
+  server/     FastAPI REST + WebSocket, serves web/out (+ optional built-in mock robot)
   mock/       simulated robot (all commands, 5 reports, multi-packet device state, nav tasks)
 web/          Next.js GUI (static export)
-docs/         ROS2_TOPIC_DEBUG.md, PROTOCOL_NOTES.md
+scripts/      smoke.py — end-to-end check used by `make smoke` and CI
+docs/         ROS2_TOPIC_DEBUG.md, PROTOCOL_NOTES.md, manual/ (LaTeX source + PDF)
 assets/       EZRA Robotics logo (SVG + original PNG), icon, banner
+.github/      CI workflows
 ```
 
 Where the PDF was clipped or ambiguous (JSON format byte, multi-packet rule, plain ports, some enum
@@ -128,7 +148,9 @@ values) the choice is documented in [docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES
 | `protocol/cipher mismatch` | enable compat mode in connection settings (`--compat` on the CLI) |
 | **Link lost** in the top bar | heartbeats get no ACK for 3 s: robot rebooted, cable/Wi-Fi dropped or DTLS session reset — reconnect |
 | `ICMP port unreachable` | nothing listens on that UDP port — the plain port is closed while encryption is on |
-| Heartbeat ACKed but no reports | replies come from another port: turn off *Connected UDP socket* in settings |
+| Heartbeat ACKed but no reports | reports come from another source port: turn off *Connected UDP socket* in settings — or another client also sends heartbeats, so the robot reports to it |
+| `port 8765 is already in use` | the debugger already runs in another terminal: open http://127.0.0.1:8765 or stop it (Ctrl+C) |
+| `mock robot not started: … already in use` | another mock is running (`make demo` / `make mock`); the Mock presets work with that one |
 | `E006 Mismatched request client` | another client sent axis commands within the last 2 s |
 | `E00A Unsupported function` | navigation needs the PRO version |
 | `E007 No operation permission` on SDK mode | SDK mode must be unlocked by after-sales |
