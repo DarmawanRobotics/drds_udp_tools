@@ -204,6 +204,8 @@ export interface Stats {
     last_error_code: number | null;
     last_ack_ts: number | null;
     reporting_active: boolean;
+    ack_age_s: number | null;
+    link_lost: boolean;
   };
   rates: { type: number | null; command: number | null; name: string; hz: number; count: number }[];
   reports: Record<string, ReportStat>;
@@ -312,6 +314,7 @@ export interface ConnectConfig {
     ciphers: string | null;
     server_name: string | null;
     dtls_mtu: number;
+    compat: boolean;
   };
 }
 
@@ -375,4 +378,24 @@ export interface EncodeResult {
   packets: number;
   body_text: string;
   headers: HeaderInfo[];
+}
+
+export type ProbeStatus = "ok" | "no_reply" | "refused" | "unreachable" | "handshake_failed" | "timeout" | "error";
+
+export interface ProbeResult {
+  transport: TransportKind;
+  port: number;
+  status: ProbeStatus;
+  detail: string;
+  latency_ms: number | null;
+  error_code: number | null;
+  protocol: string | null;
+  cipher: string | null;
+  elapsed_ms: number;
+}
+
+export interface ProbeReport {
+  host: string;
+  results: ProbeResult[];
+  best: ProbeResult | null;
 }
