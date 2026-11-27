@@ -4,6 +4,7 @@
     ezra-udp serve --mock                # same, plus a fake robot in the same process
     ezra-udp mock                        # fake robot on 127.0.0.1 (udp 30000 / dtls 30004 / tcp 30001 / tls 30003)
     ezra-udp list                        # every command in the docs
+    ezra-udp probe                       # which mode/port does the robot answer on?
     ezra-udp send heartbeat -t dtls --host 10.21.33.103
     ezra-udp send gait --items '{"GaitParam": 4097}'
     ezra-udp listen -s 10                # heartbeat + print status reports
@@ -43,6 +44,7 @@ def _conn_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--ca", help="CA file for --verify")
     g.add_argument("--cert", help="client certificate (mutual TLS)")
     g.add_argument("--key", help="client private key")
+    g.add_argument("--compat", action="store_true", help="allow old TLS/DTLS versions and weak ciphers")
 
 
 def _session_cfg(a):
@@ -50,7 +52,7 @@ def _session_cfg(a):
     from .transport import TlsOptions, TransportConfig
 
     port = a.port or DEFAULT_PORTS[a.transport]
-    tls = TlsOptions(verify=a.verify, ca_file=a.ca, cert_file=a.cert, key_file=a.key)
+    tls = TlsOptions(verify=a.verify, ca_file=a.ca, cert_file=a.cert, key_file=a.key, compat=a.compat)
     t = TransportConfig(kind=a.transport, host=a.host, port=port, bind_port=a.bind_port, tls=tls)
     return SessionConfig(transport=t, fmt=AsduFormat.XML if a.xml else AsduFormat.JSON,
                          heartbeat_enabled=not a.no_heartbeat, heartbeat_hz=a.hb_hz, response_timeout=a.timeout)
@@ -196,6 +198,34 @@ def cmd_suite(a) -> int:
     return asyncio.run(main())
 
 
+def cmd_probe(a) -> int:
+    from .engine.probe import DEFAULT_CANDIDATES, probe
+    from .transport import TlsOptions
+
+    cands = DEFAULT_CANDIDATES
+    if a.ports:
+        cands = []
+        for item in a.ports.split(","):
+            kind, _, port = item.strip().partition(":")
+            cands.append((kind.lower(), int(port)))
+    tls = TlsOptions(verify=a.verify, ca_file=a.ca, cert_file=a.cert, key_file=a.key, compat=a.compat)
+    print(f"→ probing {a.host} on {len(cands)} transport/port combinations (≈{a.timeout + 1.6:.0f} s) ...", flush=True)
+    rep = asyncio.run(probe(a.host, cands, a.timeout, tls))
+    icon = {"ok": "✓", "no_reply": "·", "refused": "✗", "unreachable": "✗", "handshake_failed": "!", "timeout": "…",
+            "error": "✗"}
+    print(f"\n{'mode':<6} {'port':<6} {'result':<17} detail")
+    for r in rep["results"]:
+        print(f"{r['transport'].upper():<6} {r['port']:<6} {icon[r['status']]} {r['status']:<15} {r['detail']}")
+    best = rep["best"]
+    if best:
+        print(f"\n→ use: ezra-udp ... -t {best['transport']} --port {best['port']}  "
+              f"(GUI: transport {best['transport'].upper()}, port {best['port']})")
+        return 0
+    print("\n✗ nothing answered a heartbeat. Check: ping, IP/subnet of this Mac, robot powered and robotserver running,"
+          " certificates (--ca/--cert/--key) or --compat.")
+    return 1
+
+
 def cmd_decode(a) -> int:
     raw = parse_hex(" ".join(a.hex) if a.hex else sys.stdin.read())
     frames, errors = parse_datagram(raw)
@@ -306,6 +336,17 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--json", help="write the report to this file")
     _conn_args(sp)
     sp.set_defaults(fn=cmd_suite)
+
+    sp = sub.add_parser("probe", help="find which transport/port the robot answers on")
+    sp.add_argument("--host", default=DEFAULT_ROBOT_HOST)
+    sp.add_argument("--ports", help="e.g. dtls:30004,tls:30003,udp:30000 (default: the 6 usual combinations)")
+    sp.add_argument("--timeout", type=float, default=2.5, help="connect/handshake timeout per candidate [s]")
+    sp.add_argument("--verify", action="store_true")
+    sp.add_argument("--ca")
+    sp.add_argument("--cert")
+    sp.add_argument("--key")
+    sp.add_argument("--compat", action="store_true")
+    sp.set_defaults(fn=cmd_probe)
 
     sp = sub.add_parser("decode", help="decode a hex APDU (args or stdin)")
     sp.add_argument("hex", nargs="*")
