@@ -48,6 +48,7 @@ class TlsIn(BaseModel):
     ciphers: str | None = None
     server_name: str | None = None
     dtls_mtu: int = 1400
+    compat: bool = False
 
 
 class ConnectIn(BaseModel):
@@ -108,6 +109,18 @@ class SuiteIn(BaseModel):
     allow_caution: bool = False
     allow_motion: bool = False
     report_window: float = 3.0
+
+
+class ProbeCandidate(BaseModel):
+    transport: Literal["udp", "dtls", "tcp", "tls"]
+    port: int
+
+
+class ProbeIn(BaseModel):
+    host: str = "10.21.33.103"
+    timeout: float = 2.5
+    candidates: list[ProbeCandidate] | None = None
+    tls: TlsIn = Field(default_factory=TlsIn)
 
 
 class EncodeIn(SendIn):
@@ -316,6 +329,16 @@ def create_app(web_dir: Path | None = None, session: Session | None = None, mock
             d = decode_asdu(b"".join(fr.body for fr in frames), frames[0].header.asdu_format)
             joined = {"ok": d.ok, "error": d.error, "data": d.data, "name": message_name(d.type, d.command)}
         return {"size": len(raw), "frames": out, "errors": errors, "joined": joined, "hexdump": hexdump(raw)}
+
+    # ---------------------------------------------------------------- probe
+    @app.post("/api/probe")
+    @_guard
+    async def probe_ports(body: ProbeIn):
+        """Try every transport/port combination with its own socket and one heartbeat."""
+        from ..engine.probe import probe
+
+        cands = [(c.transport, c.port) for c in body.candidates] if body.candidates else None
+        return await probe(body.host.strip(), cands, body.timeout, TlsOptions(**body.tls.model_dump()))
 
     # ---------------------------------------------------------------- suite
     @app.get("/api/suite/checks")
