@@ -19,3 +19,12 @@ web/.env.local
 .DS_Store
 *.log
 report*.json
+
+# latex (docs/manual)
+docs/manual/*.aux
+docs/manual/*.fdb_latexmk
+docs/manual/*.fls
+docs/manual/*.out
+docs/manual/*.toc
+docs/manual/*.xdv
+docs/manual/*.synctex.gz
