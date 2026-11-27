@@ -86,7 +86,8 @@ class DtlsTransport(Transport):
             except SSL.Error as exc:
                 self._flush()  # deliver our alert to the peer
                 text = ssl_error_text(exc)
-                raise TransportError(f"DTLS handshake failed: {text}{handshake_hint(text, 'dtls')}") from exc
+                hint = handshake_hint(text, "dtls", bool(self.cfg.tls.cert_file))
+                raise TransportError(f"DTLS handshake failed: {text}{hint}") from exc
             if self._sock_error:
                 raise TransportError(f"DTLS handshake aborted: {self._sock_error}")
             remaining = deadline - loop.time()
