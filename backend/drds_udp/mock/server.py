@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import errno
 import logging
 import random
 import ssl
@@ -28,6 +29,19 @@ from ..protocol import (
 from .sim import E_FORMAT, Reply, RobotSim, general
 
 log = logging.getLogger("ezra.mock")
+
+
+class PortBusyError(OSError):
+    """A mock robot port is taken, usually by another mock robot."""
+
+
+def _addr_in_use(exc: BaseException | None) -> bool:
+    """EADDRINUSE anywhere in the chain (uvloop wraps the UDP bind error without an errno)."""
+    while exc is not None:
+        if isinstance(exc, OSError) and exc.errno == errno.EADDRINUSE:
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 class MockClient:
@@ -134,26 +148,44 @@ class MockRobot:
                     c.send(rep, c.next_report_id())
 
     # ---------------------------------------------------------- transports
+    async def _bind(self, kind: str, opener):
+        try:
+            return await opener()
+        except OSError as exc:
+            if _addr_in_use(exc):
+                raise PortBusyError(errno.EADDRINUSE, f"{kind.upper()} port {self.ports[kind]} on {self.host} is already "
+                                    "in use (another mock robot running? make demo / make mock / ezra-udp serve --mock)") from exc
+            raise
+
     async def start(self) -> None:
+        try:
+            await self._start()
+        except OSError:
+            await self.stop()  # close whatever did bind
+            raise
+
+    async def _start(self) -> None:
         loop = asyncio.get_running_loop()
         if self.ports["udp"] is not None:
-            t, _ = await loop.create_datagram_endpoint(lambda: _UdpServer(self), local_addr=(self.host, self.ports["udp"]))
+            t, _ = await self._bind("udp", lambda: loop.create_datagram_endpoint(
+                lambda: _UdpServer(self), local_addr=(self.host, self.ports["udp"])))
             self.bound["udp"] = t.get_extra_info("sockname")[1]
             self._closers.append(t.close)
         if self.ports["dtls"] is not None:
-            t, _ = await loop.create_datagram_endpoint(lambda: _DtlsServer(self),
-                                                       local_addr=(self.host, self.ports["dtls"]))
+            t, _ = await self._bind("dtls", lambda: loop.create_datagram_endpoint(
+                lambda: _DtlsServer(self), local_addr=(self.host, self.ports["dtls"])))
             self.bound["dtls"] = t.get_extra_info("sockname")[1]
             self._closers.append(t.close)
         if self.ports["tcp"] is not None:
-            srv = await asyncio.start_server(lambda r, w: self._stream_client("tcp", r, w), self.host, self.ports["tcp"])
+            srv = await self._bind("tcp", lambda: asyncio.start_server(
+                lambda r, w: self._stream_client("tcp", r, w), self.host, self.ports["tcp"]))
             self.bound["tcp"] = srv.sockets[0].getsockname()[1]
             self._closers.append(srv.close)
         if self.ports["tls"] is not None:
             sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             sctx.load_cert_chain(self.cert_file, self.key_file)
-            srv = await asyncio.start_server(lambda r, w: self._stream_client("tls", r, w), self.host,
-                                             self.ports["tls"], ssl=sctx)
+            srv = await self._bind("tls", lambda: asyncio.start_server(
+                lambda r, w: self._stream_client("tls", r, w), self.host, self.ports["tls"], ssl=sctx))
             self.bound["tls"] = srv.sockets[0].getsockname()[1]
             self._closers.append(srv.close)
         self._tasks.append(asyncio.create_task(self._report_loop()))
@@ -163,7 +195,10 @@ class MockRobot:
             t.cancel()
         for c in self._closers:
             c()
+        self._tasks.clear()
+        self._closers.clear()
         self._certdir.cleanup()
+        await asyncio.sleep(0)  # datagram transports close their socket on the next loop iteration
 
     async def _stream_client(self, kind: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         addr = writer.get_extra_info("peername")
@@ -325,4 +360,4 @@ async def run_mock(**kw) -> None:
         await robot.stop()
 
 
-__all__ = ["MockRobot", "run_mock"]
+__all__ = ["MockRobot", "PortBusyError", "run_mock"]
