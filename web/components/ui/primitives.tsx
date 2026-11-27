@@ -155,7 +155,7 @@ export function Switch({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-[18px] w-8 rounded-full border transition-colors ${
+        className={`relative h-[18px] w-8 flex-none rounded-full border transition-colors ${
           checked ? "border-tx bg-tx" : "border-line-strong bg-well"
         }`}
       >
