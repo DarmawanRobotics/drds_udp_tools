@@ -2,6 +2,7 @@
 
 import { Lock, LockOpen, SlidersHorizontal, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, ApiError } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import type { TransportKind } from "@/lib/types";
@@ -74,6 +75,7 @@ function ConnectionBar() {
   const { connect, disconnect, busy } = useConnectActions();
   const live = state === "connected" || state === "connecting";
   const [showAdv, setShowAdv] = useState(false);
+  const gearRef = useRef<HTMLButtonElement>(null);
 
   const setTransport = (t: TransportKind) => {
     const wasDefault = Object.values(DEFAULT_PORT).includes(conn.port);
@@ -150,6 +152,7 @@ function ConnectionBar() {
       />
       <div className="relative">
         <button
+          ref={gearRef}
           type="button"
           className="btn btn-ghost w-8 px-0"
           aria-label="Connection settings"
@@ -158,7 +161,7 @@ function ConnectionBar() {
         >
           <SlidersHorizontal size={16} />
         </button>
-        {showAdv ? <AdvancedSettings onClose={() => setShowAdv(false)} /> : null}
+        {showAdv ? <AdvancedSettings anchor={gearRef.current} onClose={() => setShowAdv(false)} /> : null}
       </div>
       <button type="submit" className={`btn min-w-[100px] ${live ? "" : "btn-primary"}`} disabled={busy}>
         {busy ? (state === "connected" ? "Disconnecting…" : "Connecting…") : live ? "Disconnect" : "Connect"}
@@ -172,14 +175,15 @@ function ConnectionBar() {
   );
 }
 
-function AdvancedSettings({ onClose }: { onClose: () => void }) {
+function AdvancedSettings({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () => void }) {
   const conn = useStore((s) => s.conn);
   const setConn = useStore((s) => s.setConn);
   const live = useStore((s) => s.session?.state === "connected");
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !anchor?.contains(t)) onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("mousedown", onDoc);
@@ -188,11 +192,17 @@ function AdvancedSettings({ onClose }: { onClose: () => void }) {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
+  }, [onClose, anchor]);
   const num = (v: string, d: number) => (v === "" || Number.isNaN(Number(v)) ? d : Number(v));
   const tls = conn.tls;
-  return (
-    <div ref={ref} className="panel absolute top-10 left-0 z-40 w-[440px] p-4 shadow-xl">
+  // portal + fixed position: the header clips overflow, so the panel must live outside it
+  const r = anchor?.getBoundingClientRect();
+  const width = 440;
+  const left = Math.max(8, Math.min((r?.left ?? 8) - 8, window.innerWidth - width - 8));
+  const top = (r?.bottom ?? 52) + 8;
+  return createPortal(
+    <div ref={ref} role="dialog" aria-label="Connection settings" style={{ left, top, width }}
+      className="panel fixed z-50 max-h-[calc(100vh-80px)] overflow-y-auto p-4 shadow-xl">
       <div className="mb-3 font-cond text-[16px] font-semibold">Connection settings</div>
       <div className="grid grid-cols-2 gap-3">
         <Labeled label="Heartbeat rate (Hz)" hint="Docs: at least 1 Hz; reports stop after 2 s of silence.">
@@ -221,9 +231,11 @@ function AdvancedSettings({ onClose }: { onClose: () => void }) {
       <div className="mt-4 border-t border-line pt-3">
         <div className="mb-2 text-[13px] font-semibold">TLS / DTLS</div>
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
+          <div className="col-span-2 flex flex-col gap-2">
             <Switch checked={tls.verify} disabled={live} onChange={(v) => setConn({ tls: { ...tls, verify: v } })}
               label="Verify the robot certificate (off = accept self-signed)" />
+            <Switch checked={tls.compat} disabled={live} onChange={(v) => setConn({ tls: { ...tls, compat: v } })}
+              label="Compat mode: allow old TLS/DTLS versions and weak ciphers" />
           </div>
           {(["ca_file", "cert_file", "key_file", "server_name"] as const).map((k) => (
             <Labeled key={k} label={{ ca_file: "CA file", cert_file: "Client certificate", key_file: "Client key", server_name: "Server name (SNI)" }[k]}>
@@ -242,7 +254,8 @@ function AdvancedSettings({ onClose }: { onClose: () => void }) {
           </Labeled>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -264,6 +277,14 @@ function LinkStatus() {
   }
   const hb = stats.heartbeat;
   const c = stats.counters;
+  if (hb.link_lost) {
+    return (
+      <div className="flex items-center gap-2 text-[12.5px] font-semibold whitespace-nowrap text-bad"
+        title="Heartbeats go out but the robot stopped answering. See Traffic → Engine log.">
+        <Lamp on="bad" /> Link lost {hb.ack_age_s != null ? `· ${hb.ack_age_s.toFixed(0)} s` : "· no ACK yet"}
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-3 text-[12.5px] whitespace-nowrap">
       <div className="flex items-center gap-2" title={`Heartbeat ${hb.enabled ? "on" : "off"} — sent ${hb.sent}, acked ${hb.acked}, missed ${hb.missed}`}>

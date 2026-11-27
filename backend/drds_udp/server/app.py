@@ -48,6 +48,7 @@ class TlsIn(BaseModel):
     ciphers: str | None = None
     server_name: str | None = None
     dtls_mtu: int = 1400
+    compat: bool = False
 
 
 class ConnectIn(BaseModel):
@@ -110,6 +111,18 @@ class SuiteIn(BaseModel):
     report_window: float = 3.0
 
 
+class ProbeCandidate(BaseModel):
+    transport: Literal["udp", "dtls", "tcp", "tls"]
+    port: int
+
+
+class ProbeIn(BaseModel):
+    host: str = "10.21.33.103"
+    timeout: float = 2.5
+    candidates: list[ProbeCandidate] | None = None
+    tls: TlsIn = Field(default_factory=TlsIn)
+
+
 class EncodeIn(SendIn):
     msg_id: int = 0
 
@@ -166,24 +179,47 @@ def default_web_dir() -> Path | None:
     return None
 
 
+async def _start_mock(kwargs: dict):
+    from ..mock import MockRobot
+
+    robot = MockRobot(**kwargs)
+    try:
+        await robot.start()
+    except OSError as exc:
+        await robot.stop()  # close whatever did bind
+        print(f"  ! built-in mock not started: {exc} — is `ezra-udp mock` already running?", flush=True)
+        return None
+    ports = ", ".join(f"{k.upper()} {v}" for k, v in robot.bound.items())
+    print(f"  Mock robot: {robot.host} — {ports}  (pick a Mock preset in the GUI)", flush=True)
+    return robot
+
+
 # --------------------------------------------------------------------- app
-def create_app(web_dir: Path | None = None, session: Session | None = None) -> FastAPI:
+def create_app(web_dir: Path | None = None, session: Session | None = None, mock: dict | None = None) -> FastAPI:
+    """`mock` = MockRobot kwargs to run a simulated robot inside this process (one terminal, one Ctrl+C)."""
     bus = session.bus if session else EventBus()
     sess = session or Session(bus)
     state: dict[str, Any] = {"suite_task": None, "suite_last": None}
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        robot = await _start_mock(mock) if mock is not None else None
+        _app.state.mock = robot
         yield
         await sess.disconnect("shutdown")
+        if robot is not None:
+            await robot.stop()
 
     app = FastAPI(title="EZRA UDP Debugger", version=__version__, lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.session = sess
+    app.state.mock = None
 
     @app.get("/api/health")
     async def health():
-        return {"ok": True, "name": "EZRA UDP Debugger", "version": __version__, "state": sess.state}
+        robot = app.state.mock
+        return {"ok": True, "name": "EZRA UDP Debugger", "version": __version__, "state": sess.state,
+                "mock": dict(robot.bound) if robot is not None else None}
 
     @app.get("/api/catalog")
     async def catalog():
@@ -293,6 +329,16 @@ def create_app(web_dir: Path | None = None, session: Session | None = None) -> F
             d = decode_asdu(b"".join(fr.body for fr in frames), frames[0].header.asdu_format)
             joined = {"ok": d.ok, "error": d.error, "data": d.data, "name": message_name(d.type, d.command)}
         return {"size": len(raw), "frames": out, "errors": errors, "joined": joined, "hexdump": hexdump(raw)}
+
+    # ---------------------------------------------------------------- probe
+    @app.post("/api/probe")
+    @_guard
+    async def probe_ports(body: ProbeIn):
+        """Try every transport/port combination with its own socket and one heartbeat."""
+        from ..engine.probe import probe
+
+        cands = [(c.transport, c.port) for c in body.candidates] if body.candidates else None
+        return await probe(body.host.strip(), cands, body.timeout, TlsOptions(**body.tls.model_dump()))
 
     # ---------------------------------------------------------------- suite
     @app.get("/api/suite/checks")

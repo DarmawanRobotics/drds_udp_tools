@@ -9,7 +9,7 @@ import asyncio
 import socket
 
 from .base import Transport, TransportError
-from .tlsconf import make_dtls_context, ssl_error_text
+from .tlsconf import handshake_hint, make_dtls_context, ssl_error_text
 from .udp import resolve_ipv4
 
 
@@ -85,7 +85,8 @@ class DtlsTransport(Transport):
                     flights += 1
             except SSL.Error as exc:
                 self._flush()  # deliver our alert to the peer
-                raise TransportError(f"DTLS handshake failed: {ssl_error_text(exc)}") from exc
+                text = ssl_error_text(exc)
+                raise TransportError(f"DTLS handshake failed: {text}{handshake_hint(text, 'dtls')}") from exc
             if self._sock_error:
                 raise TransportError(f"DTLS handshake aborted: {self._sock_error}")
             remaining = deadline - loop.time()

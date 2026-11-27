@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "drds-udp-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "EZRA UDP Debugger backend — Deep Robotics Inspection Communication Protocol (UDP/DTLS/TCP/TLS) tester"
 requires-python = ">=3.10"
 authors = [{ name = "agus-darmawan", email = "darmawandeveloper@gmail.com" }]

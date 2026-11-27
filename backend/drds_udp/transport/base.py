@@ -25,6 +25,7 @@ class TlsOptions:
     ciphers: str | None = None
     server_name: str | None = None  # SNI / hostname check
     dtls_mtu: int = 1400
+    compat: bool = False  # allow old protocol versions / weak ciphers (OpenSSL security level 0)
 
     def to_dict(self) -> dict:
         return asdict(self)

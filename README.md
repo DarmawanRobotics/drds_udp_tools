@@ -24,11 +24,14 @@ make setup          # .venv + backend (editable) + web deps
 make run            # builds the GUI, serves it on http://127.0.0.1:8765 and opens the browser
 ```
 
-No robot nearby? Start the mock in a second terminal and pick a **Mock** preset in the top bar:
+No robot nearby? One terminal is enough — this also starts a mock robot inside the same process.
+Then pick a **Mock** preset in the top bar:
 
 ```bash
-make mock           # UDP 30000 · DTLS 30004 · TCP 30001 · TLS 30003 on 127.0.0.1
+make demo           # = ezra-udp serve --mock-faults --open  (mock on UDP 30000 · DTLS 30004 · TCP 30001 · TLS 30003)
 ```
+
+`make mock` still runs the mock on its own, e.g. to hit it from the CLI or from another machine.
 
 Without `make`:
 
@@ -36,7 +39,7 @@ Without `make`:
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e "backend[dev]"
 (cd web && npm ci && npm run build)
-ezra-udp serve --open
+ezra-udp serve --open          # add --mock to get the built-in mock robot
 ```
 
 ## Connecting to the robot
@@ -49,12 +52,16 @@ ezra-udp serve --open
 | Robot · TCP plain | TCP | 30001 | same |
 
 1. Put the Mac on the robot network and `ping 10.21.33.103`.
-2. Pick a preset, **Connect**. The heartbeat starts automatically (2 Hz; the docs require ≥ 1 Hz).
-3. The top bar shows **HB acked/sent** and **Reports** — the robot only pushes status reports to the
+2. Not sure which mode is enabled on this unit? `make probe` (or **Test run → Probe** in the GUI) sends one
+   heartbeat over DTLS 30004, TLS 30003, UDP 30000/30004 and TCP 30001/30003 and tells you which one answers.
+3. Pick a preset (or press **Use** on a probe result), **Connect**. The heartbeat starts automatically
+   (2 Hz; the docs require ≥ 1 Hz). If ACKs stop for 3 s the top bar turns red: **Link lost**.
+4. The top bar shows **HB acked/sent** and **Reports** — the robot only pushes status reports to the
    address that keeps sending heartbeats.
 
 Certificates: verification is off by default (robots ship self-signed certs). CA, client cert/key, SNI,
-cipher list and DTLS MTU are in the connection settings (⚙ next to the format switch).
+cipher list, DTLS MTU and **compat mode** (old TLS/DTLS versions, weak ciphers) are in the connection settings
+(⚙ next to the format switch). Handshake errors say what to try next (plain port, certificate, compat).
 
 ## What's in the GUI
 
@@ -74,6 +81,7 @@ axis + zero velocity and cancels navigation. **E-STOP** does the same and then s
 ## CLI
 
 ```bash
+ezra-udp probe --host 10.21.33.103                # which mode/port answers? (exit 0 = something answered)
 ezra-udp list                                     # every command + report with Type/Command
 ezra-udp send heartbeat                           # DTLS to 10.21.33.103:30004 by default
 ezra-udp send location_get -t tls
@@ -83,6 +91,7 @@ ezra-udp listen -s 10                             # heartbeat + print reports, t
 ezra-udp suite --allow-caution --json report.json # conformance run
 ezra-udp decode "eb 91 eb 90 59 00 07 00 01 00 01 00 00 00 00 00 7b 22 ..."
 ezra-udp mock --faults --loss 0.05                # fake robot with fault injection and 5 % packet loss
+ezra-udp serve --mock                             # GUI + API + mock robot in one process
 ```
 
 ## Development
@@ -111,7 +120,10 @@ values) the choice is documented in [docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES
 
 | Symptom | Likely cause |
 |---|---|
-| `DTLS handshake timeout` | wrong IP/port, robot unreachable, or encryption disabled on the robot (try UDP plain) |
+| `DTLS handshake timeout` | wrong IP/port, robot unreachable, or encryption disabled on the robot — run `ezra-udp probe` |
+| `… probably a plain port` / `… expects TLS` | you picked the encrypted/plain variant of the wrong port — switch mode |
+| `protocol/cipher mismatch` | enable compat mode in connection settings (`--compat` on the CLI) |
+| **Link lost** in the top bar | heartbeats get no ACK for 3 s: robot rebooted, cable/Wi-Fi dropped or DTLS session reset — reconnect |
 | `ICMP port unreachable` | nothing listens on that UDP port — the plain port is closed while encryption is on |
 | Heartbeat ACKed but no reports | replies come from another port: turn off *Connected UDP socket* in settings |
 | `E006 Mismatched request client` | another client sent axis commands within the last 2 s |

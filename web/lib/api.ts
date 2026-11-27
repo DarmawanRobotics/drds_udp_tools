@@ -3,6 +3,7 @@ import type {
   ConnectConfig,
   DecodeResult,
   EncodeResult,
+  ProbeReport,
   RepeatJob,
   SendBody,
   SendResult,
@@ -61,6 +62,8 @@ export const api = {
   estop: () => call<{ estop: string }>("POST", "/api/estop"),
   encode: (body: SendBody & { msg_id: number }) => call<EncodeResult>("POST", "/api/codec/encode", body),
   decode: (hex: string) => call<DecodeResult>("POST", "/api/codec/decode", { hex }),
+  probe: (host: string, tls: ConnectConfig["tls"], timeout = 2.5) =>
+    call<ProbeReport>("POST", "/api/probe", { host, tls, timeout }),
   suiteChecks: () => call<SuiteCheck[]>("GET", "/api/suite/checks"),
   suiteRun: (body: { checks: string[]; allow_caution: boolean; allow_motion: boolean; report_window?: number }) =>
     call<{ started: boolean }>("POST", "/api/suite/run", body),

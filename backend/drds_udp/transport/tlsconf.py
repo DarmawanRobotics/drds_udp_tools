@@ -6,6 +6,28 @@ import ssl
 
 from .base import TlsOptions, TransportError
 
+COMPAT_CIPHERS = "DEFAULT:@SECLEVEL=0"
+
+_PLAIN_PEER = ("wrong version number", "record layer failure", "packet length too long", "unexpected record",
+               "http request", "record_layer_failure", "bad record", "decode error", "unexpected message")
+_POLICY = ("unsupported protocol", "protocol version", "no protocols available", "no ciphers available",
+           "handshake failure", "insufficient security", "dh key too small", "ee key too small", "ca md too weak")
+_CERT = ("certificate verify failed", "certificate required", "peer did not return a certificate",
+         "unknown ca", "bad certificate")
+
+
+def handshake_hint(text: str, plain_name: str) -> str:
+    """Turn an OpenSSL error into the next thing to try in the field."""
+    t = text.lower()
+    if any(k in t for k in _CERT):
+        return (" — certificate problem: turn certificate verification off, set the CA file, or provide the client "
+                "certificate/key the robot expects")
+    if any(k in t for k in _PLAIN_PEER):
+        return f" — the port answered with something that is not {plain_name.upper()}-encrypted: it is probably a plain port"
+    if any(k in t for k in _POLICY):
+        return " — protocol/cipher mismatch: enable compat mode (old TLS/DTLS versions, weak ciphers) and retry"
+    return ""
+
 
 def make_ssl_context(opts: TlsOptions) -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -21,7 +43,13 @@ def make_ssl_context(opts: TlsOptions) -> ssl.SSLContext:
         ctx.verify_mode = ssl.CERT_NONE
     if opts.cert_file:
         ctx.load_cert_chain(opts.cert_file, opts.key_file or None)
-    if opts.ciphers:
+    if opts.compat:
+        try:
+            ctx.minimum_version = ssl.TLSVersion.TLSv1
+        except (ValueError, AttributeError):
+            pass
+        ctx.set_ciphers(opts.ciphers or COMPAT_CIPHERS)
+    elif opts.ciphers:
         ctx.set_ciphers(opts.ciphers)
     return ctx
 
@@ -47,7 +75,9 @@ def make_dtls_context(opts: TlsOptions, server: bool = False):
     if opts.cert_file:
         ctx.use_certificate_chain_file(opts.cert_file)
         ctx.use_privatekey_file(opts.key_file or opts.cert_file)
-    if opts.ciphers:
+    if opts.compat:
+        ctx.set_cipher_list((opts.ciphers or COMPAT_CIPHERS).encode())
+    elif opts.ciphers:
         ctx.set_cipher_list(opts.ciphers.encode())
     return ctx
 

@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { download } from "@/lib/format";
 import { useStore } from "@/lib/store";
-import type { CheckLevel, CheckStatus, SuiteCheck, SuiteResult } from "@/lib/types";
-import { Chip, Empty, Switch, type Tone } from "../ui/primitives";
+import type { CheckLevel, CheckStatus, ProbeReport, ProbeStatus, SuiteCheck, SuiteResult } from "@/lib/types";
+import { Chip, Empty, type Tone } from "../ui/primitives";
 
 const LEVEL_TEXT: Record<CheckLevel, { title: string; body: string }> = {
   safe: { title: "Safe", body: "Read-only queries and error-path probes. Robot state is not changed." },
@@ -23,7 +23,6 @@ export function Runner() {
   const toast = useStore((s) => s.toast);
   const [checks, setChecks] = useState<SuiteCheck[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [allowCaution, setAllowCaution] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -45,10 +44,13 @@ export function Runner() {
   const run = async () => {
     const ids = checks.filter((c) => picked[c.id]).map((c) => c.id);
     if (!ids.length) return toast("warn", "Pick at least one check.");
-    const motion = ids.some((id) => checks.find((c) => c.id === id)?.level === "motion");
+    const level = (id: string) => checks.find((c) => c.id === id)?.level;
+    const motion = ids.some((id) => level(id) === "motion");
+    const caution = ids.some((id) => level(id) === "caution");
     if (motion && !armed) return toast("warn", "Motion checks selected — set the lock in the top bar to \"Armed\" first.");
     try {
-      await api.suiteRun({ checks: ids, allow_caution: allowCaution, allow_motion: motion && armed });
+      // ticking a caution/motion check is the consent; motion additionally needs "Armed"
+      await api.suiteRun({ checks: ids, allow_caution: caution, allow_motion: motion && armed });
     } catch (e) {
       toast("error", e instanceof ApiError ? e.message : String(e));
     }
@@ -83,6 +85,7 @@ export function Runner() {
           </p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
+          <ProbePanel />
           {(Object.keys(byLevel) as CheckLevel[]).map((lvl) => (
             <section key={lvl} className="border-b border-line px-4 py-3">
               <div className="flex items-center gap-2">
@@ -115,11 +118,10 @@ export function Runner() {
           ))}
         </div>
         <div className="flex flex-col gap-3 border-t border-line p-4">
-          <Switch checked={allowCaution} onChange={setAllowCaution} label="Allow caution checks to change robot state" />
           <button className="btn btn-primary h-10" disabled={!live || suite.running} onClick={run}>
             <Play size={15} /> {suite.running ? `Running ${suite.results.length}/${suite.checks.length}…` : "Run selected checks"}
           </button>
-          {!live ? <span className="text-[12.5px] text-muted">Connect first — try the Mock preset with `ezra-udp mock`.</span> : null}
+          {!live ? <span className="text-[12.5px] text-muted">Connect first — no robot? Run `make demo` and pick a Mock preset.</span> : null}
         </div>
       </aside>
 
@@ -176,5 +178,83 @@ export function Runner() {
         </div>
       </section>
     </div>
+  );
+}
+
+const PROBE_TONE: Record<ProbeStatus, Tone> = {
+  ok: "ok",
+  no_reply: "warn",
+  handshake_failed: "warn",
+  refused: "bad",
+  unreachable: "bad",
+  error: "bad",
+  timeout: "neutral",
+};
+
+function ProbePanel() {
+  const conn = useStore((s) => s.conn);
+  const setConn = useStore((s) => s.setConn);
+  const live = useStore((s) => s.session?.state === "connected");
+  const toast = useStore((s) => s.toast);
+  const [host, setHost] = useState(conn.host);
+  const [busy, setBusy] = useState(false);
+  const [rep, setRep] = useState<ProbeReport | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await api.probe(host.trim(), conn.tls);
+      setRep(r);
+      if (!r.best) toast("warn", "Nothing answered a heartbeat — check the network section of the manual.");
+    } catch (e) {
+      toast("error", e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="border-b border-line px-4 py-3">
+      <h3 className="text-[14px] font-semibold">Find the robot&apos;s mode and port</h3>
+      <p className="mt-1 mb-2 text-[12.5px] text-muted">
+        One heartbeat each over DTLS 30004, TLS 30003, UDP 30000/30004 and TCP 30001/30003, every one from its own socket.
+      </p>
+      <div className="flex gap-2">
+        <input className="field min-w-0 flex-1 font-mono text-[12.5px]" aria-label="Robot host to probe" value={host}
+          spellCheck={false} onChange={(e) => setHost(e.target.value)} />
+        <button className="btn btn-primary" disabled={busy || live || !host.trim()} onClick={run}>
+          {busy ? "Probing…" : "Probe"}
+        </button>
+      </div>
+      {live ? (
+        <p className="mt-1.5 text-[12px] text-faint">Disconnect first — probe heartbeats would pull the robot&apos;s reports to other ports.</p>
+      ) : null}
+      {rep ? (
+        <ul className="mt-3 flex flex-col gap-2">
+          {rep.results.map((r) => (
+            <li key={`${r.transport}-${r.port}`} className="flex items-start gap-2 text-[12.5px]">
+              <span className="w-[86px] flex-none pt-0.5">
+                <Chip tone={PROBE_TONE[r.status]}>{r.status.replace("_", " ")}</Chip>
+              </span>
+              <span className="w-[78px] flex-none pt-0.5 font-mono text-[11.5px]">
+                {r.transport.toUpperCase()} {r.port}
+              </span>
+              <span className="line-clamp-2 min-w-0 flex-1 text-muted" title={r.detail}>
+                {r.detail}
+              </span>
+              {r.status === "ok" ? (
+                <button className="flex-none pt-0.5 text-[12.5px] font-semibold text-tx hover:underline"
+                  onClick={() => {
+                    setConn({ transport: r.transport, host: rep.host, port: r.port });
+                    toast("info", `Using ${r.transport.toUpperCase()} ${rep.host}:${r.port} — press Connect.`);
+                  }}>
+                  Use
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }

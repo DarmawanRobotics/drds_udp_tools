@@ -38,6 +38,7 @@ Expect = Literal["auto", "general", "data", "none", "deferred"]
 HEX_LIMIT = 16384
 TEXT_LIMIT = 32768
 RATE_WINDOW = 5.0
+LINK_LOST_S = 3.0
 
 
 class NotConnected(RuntimeError):
@@ -128,6 +129,8 @@ class Session:
         self.hb = dict(enabled=self.cfg.heartbeat_enabled, hz=self.cfg.heartbeat_hz, sent=0, acked=0, missed=0,
                        last_latency_ms=None, last_error_code=None, last_ack_ts=None)
         self._last_report_mono: float | None = None
+        self._last_ack_mono: float | None = None
+        self._link_lost = False
         self._reasm = Reassembler()
 
     async def connect(self, cfg: SessionConfig) -> dict:
@@ -274,13 +277,20 @@ class Session:
                 old.future.cancel()
             self._pending[msg_id] = pend
 
-        for apdu in apdus:
-            await self.transport.send(apdu)
-            self.counters["tx_packets"] += 1
-            self.counters["tx_bytes"] += len(apdu)
+        # publish the TX event before the bytes leave, so a fast reply can never overtake it
         tx_ev = self._emit_tx(spec, msg_id, typ, cmd, fmt, apdus, asdu_obj, expect)
         if pend:
             pend.tx_seq = tx_ev["seq"]
+        try:
+            for apdu in apdus:
+                await self.transport.send(apdu)
+                self.counters["tx_packets"] += 1
+                self.counters["tx_bytes"] += len(apdu)
+        except Exception as exc:
+            if pend is not None and self._pending.get(msg_id) is pend:
+                del self._pending[msg_id]
+            self._log("error", f"send failed for msg {msg_id} ({message_name(typ, cmd)}): {exc}")
+            raise
 
         result: dict = {"msg_id": msg_id, "type": typ, "command": cmd, "name": message_name(typ, cmd),
                         "expect": expect, "status": "sent", "response": None, "latency_ms": None,
@@ -409,6 +419,10 @@ class Session:
                     self.hb["last_latency_ms"] = latency
                     self.hb["last_error_code"] = err_code
                     self.hb["last_ack_ts"] = time.time()
+                    self._last_ack_mono = now
+                    if self._link_lost:
+                        self._link_lost = False
+                        self._log("info", "link restored — heartbeat ACKs are back")
                 else:
                     self.counters["responses"] += 1
             else:
@@ -487,11 +501,25 @@ class Session:
                         del self._pending[mid]
                         if not p.responses and p.kind == "heartbeat":
                             self.hb["missed"] += 1
+                self._watch_link(now)
                 if now - last_stats >= 1.0:
                     last_stats = now
                     self.bus.publish("stats", {"stats": self.stats_snapshot()})
         except asyncio.CancelledError:
             return
+
+    def _watch_link(self, now: float) -> None:
+        """Flag a dead link: heartbeats go out but no ACK for LINK_LOST_S."""
+        if not self.hb["enabled"] or self.hb["sent"] < 3 or self._connected_mono is None:
+            return
+        ref = self._last_ack_mono or self._connected_mono
+        if not self._link_lost and now - ref > LINK_LOST_S:
+            self._link_lost = True
+            never = self._last_ack_mono is None
+            self._log("error", (
+                f"link lost — no heartbeat ACK for {now - ref:.1f} s"
+                + (" since connecting (wrong port/mode? use `ezra-udp probe`)" if never
+                   else " (robot rebooted, cable/Wi-Fi dropped, or DTLS session reset — reconnect)")))
 
     # ---------------------------------------------------------- repeat jobs
     async def start_repeat(self, spec: SendSpec, hz: float, duration: float | None = None,
@@ -598,9 +626,10 @@ class Session:
             reports[rid] = {k: v for k, v in r.items() if k != "items"}
             reports[rid]["hz"] = self._rate(self._report_times[rid], now)
         active = self._last_report_mono is not None and now - self._last_report_mono < 2.5
+        ack_age = round(now - self._last_ack_mono, 2) if self._last_ack_mono is not None else None
         return {
             "counters": dict(self.counters),
-            "heartbeat": {**self.hb, "reporting_active": active},
+            "heartbeat": {**self.hb, "reporting_active": active, "ack_age_s": ack_age, "link_lost": self._link_lost},
             "rates": sorted(rates, key=lambda r: -r["hz"]),
             "reports": reports,
             "pending": len(self._pending),
