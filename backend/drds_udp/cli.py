@@ -222,6 +222,10 @@ def cmd_probe(a) -> int:
         print(f"\n→ use: ezra-udp ... -t {best['transport']} --port {best['port']}  "
               f"(GUI: transport {best['transport'].upper()}, port {best['port']})")
         return 0
+    if any("client certificate" in r["detail"] for r in rep["results"]):
+        print(f"\n✗ the robot asks for a client certificate (mutual TLS) on its encrypted ports. Get the client "
+              f"certificate + key from Deep Robotics, then:\n  ezra-udp probe --host {a.host} --cert client.crt --key client.key")
+        return 1
     print("\n✗ nothing answered a heartbeat. Check: ping, IP/subnet of this Mac, robot powered and robotserver running,"
           " certificates (--ca/--cert/--key) or --compat.")
     return 1
@@ -256,7 +260,7 @@ def cmd_mock(a) -> int:
         asyncio.run(run_mock(host=a.host, udp_port=None if a.udp < 0 else a.udp, dtls_port=None if a.dtls < 0 else a.dtls,
                              tcp_port=None if a.tcp < 0 else a.tcp, tls_port=None if a.tls < 0 else a.tls,
                              version="STD" if a.std else "PRO", sdk_unlocked=a.sdk_unlocked, faults=a.faults,
-                             loss=a.loss, verbose=not a.quiet))
+                             loss=a.loss, verbose=not a.quiet, require_client_cert=a.mtls))
     except KeyboardInterrupt:
         pass
     except OSError as exc:
@@ -330,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--sdk-unlocked", action="store_true")
     sp.add_argument("--faults", action="store_true", help="inject a fault every 15 s")
     sp.add_argument("--loss", type=float, default=0.0, help="drop probability for outgoing packets (0..1)")
+    sp.add_argument("--mtls", action="store_true", help="DTLS/TLS require a client certificate (like the real robot)")
     sp.add_argument("--quiet", action="store_true")
     sp.set_defaults(fn=cmd_mock)
 
