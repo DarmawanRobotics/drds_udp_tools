@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend · ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e "backend[dev]"
+
+      - name: Unit + end-to-end tests (UDP, DTLS, TCP, TLS against the mock robot)
+        working-directory: backend
+        run: python -m pytest -q
+
+      - name: CLI against the mock robot (probe + conformance run on every transport)
+        run: |
+          ezra-udp mock --quiet > mock.log 2>&1 &
+          MOCK=$!
+          python - <<'EOF'
+          import socket, time
+          for _ in range(80):
+              try:
+                  socket.create_connection(("127.0.0.1", 30003), 0.5).close()
+                  break
+              except OSError:
+                  time.sleep(0.25)
+          else:
+              raise SystemExit("mock robot did not start")
+          EOF
+          kill -0 "$MOCK"
+          ezra-udp probe --host 127.0.0.1
+          ezra-udp send location_get -t dtls --host 127.0.0.1
+          ezra-udp suite -t dtls --host 127.0.0.1 --allow-caution --allow-motion --json suite-dtls.json
+          ezra-udp suite -t tls --host 127.0.0.1 --allow-caution --json suite-tls.json
+          ezra-udp suite -t udp --host 127.0.0.1 --json suite-udp.json
+          ezra-udp suite -t tcp --host 127.0.0.1 --xml --json suite-tcp.json
+          kill "$MOCK"
+
+      - name: Mock robot log
+        if: failure()
+        run: cat mock.log || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: suite-${{ matrix.os }}-py${{ matrix.python }}
+          path: suite-*.json
+          if-no-files-found: ignore
+
+  web:
+    name: web · build + end-to-end smoke
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Build static GUI
+        working-directory: web
+        run: npm run build
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Smoke test (GUI + API + mock robot, all four transports)
+        run: |
+          python -m pip install -e backend
+          python scripts/smoke.py --gui
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gui-web-out
+          path: web/out

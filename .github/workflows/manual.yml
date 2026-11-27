@@ -1,0 +1,46 @@
+name: Manual
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/manual/**", ".github/workflows/manual.yml"]
+  pull_request:
+    paths: ["docs/manual/**", ".github/workflows/manual.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: manual-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pdf:
+    name: build manual pdf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install XeLaTeX and fonts
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            texlive-xetex texlive-latex-recommended texlive-latex-extra texlive-pictures texlive-fonts-recommended \
+            latexmk fonts-lmodern fonts-crosextra-carlito fonts-dejavu-core fonts-dejavu-mono
+
+      - name: Build
+        working-directory: docs/manual
+        run: latexmk -xelatex -interaction=nonstopmode -halt-on-error ezra-udp-debugger-manual.tex
+
+      - name: No missing glyphs
+        working-directory: docs/manual
+        run: |
+          if grep -n "Missing character" ezra-udp-debugger-manual.log; then
+            echo "::error::a glyph is missing from the fonts (see above)"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: manual-pdf
+          path: docs/manual/ezra-udp-debugger-manual.pdf
