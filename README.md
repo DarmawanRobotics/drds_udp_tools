@@ -63,6 +63,9 @@ Certificates: verification is off by default (robots ship self-signed certs). CA
 cipher list, DTLS MTU and **compat mode** (old TLS/DTLS versions, weak ciphers) are in the connection settings
 (⚙ next to the format switch). Handshake errors say what to try next (plain port, certificate, compat).
 
+The full field manual — what each mode means, the step-by-step factory check and a printable checklist — is
+[docs/manual/ezra-udp-debugger-manual.pdf](docs/manual/ezra-udp-debugger-manual.pdf) (rebuild with `make manual`).
+
 ## What's in the GUI
 
 | View | What it does |
