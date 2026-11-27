@@ -7,7 +7,7 @@ import ssl
 
 from ..protocol.header import HEADER_SIZE, StreamFramer
 from .base import Transport, TransportError
-from .tlsconf import make_ssl_context
+from .tlsconf import handshake_hint, make_ssl_context
 
 
 class StreamTransport(Transport):
@@ -20,6 +20,7 @@ class StreamTransport(Transport):
         self._task: asyncio.Task | None = None
         self._closing = False
         self.kind = self.cfg.kind  # "tcp" | "tls"
+        self.first_bytes = b""  # first bytes received (probe uses them to spot a TLS alert on a "plain" port)
 
     async def open(self) -> None:
         ctx = make_ssl_context(self.cfg.tls) if self.cfg.kind == "tls" else None
@@ -36,7 +37,8 @@ class StreamTransport(Transport):
         except asyncio.TimeoutError as exc:
             raise TransportError(f"{self.kind.upper()} connect timeout to {self.cfg.host}:{self.cfg.port}") from exc
         except ssl.SSLError as exc:
-            raise TransportError(f"TLS handshake failed: {exc.reason or exc}") from exc
+            text = f"{exc.reason or ''} {exc}".strip()
+            raise TransportError(f"TLS handshake failed: {exc.reason or exc}{handshake_hint(text, 'tls')}") from exc
         except OSError as exc:
             raise TransportError(f"{self.kind.upper()} connect to {self.cfg.host}:{self.cfg.port} failed: {exc}") from exc
         self.local_addr = self._writer.get_extra_info("sockname")
@@ -58,6 +60,8 @@ class StreamTransport(Transport):
                 if not data:
                     break
                 self.bytes_in += len(data)
+                if len(self.first_bytes) < 16:
+                    self.first_bytes += data[: 16 - len(self.first_bytes)]
                 for fr in framer.feed(data):
                     self.on_frame(fr.header.pack() + fr.body, self.remote_addr)
                 if framer.junk_bytes != last_junk:
@@ -67,6 +71,10 @@ class StreamTransport(Transport):
             return
         except (ConnectionError, ssl.SSLError, OSError) as exc:
             reason = f"connection error: {exc}"
+        if self.kind == "tcp" and self.first_bytes[:1] in (b"\x15", b"\x16") and self.first_bytes[1:2] == b"\x03":
+            reason += " — the robot answered with a TLS record: this port expects TLS, not plain TCP"
+        elif self.kind == "tcp" and self.bytes_in == 0 and self.bytes_out > 0:
+            reason += " — closed without replying to our first packet: the port probably expects TLS (try TLS mode)"
         if not self._closing:
             self.on_closed(reason)
 
