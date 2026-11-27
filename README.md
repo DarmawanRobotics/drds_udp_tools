@@ -24,11 +24,14 @@ make setup          # .venv + backend (editable) + web deps
 make run            # builds the GUI, serves it on http://127.0.0.1:8765 and opens the browser
 ```
 
-No robot nearby? Start the mock in a second terminal and pick a **Mock** preset in the top bar:
+No robot nearby? One terminal is enough — this also starts a mock robot inside the same process.
+Then pick a **Mock** preset in the top bar:
 
 ```bash
-make mock           # UDP 30000 · DTLS 30004 · TCP 30001 · TLS 30003 on 127.0.0.1
+make demo           # = ezra-udp serve --mock-faults --open  (mock on UDP 30000 · DTLS 30004 · TCP 30001 · TLS 30003)
 ```
+
+`make mock` still runs the mock on its own, e.g. to hit it from the CLI or from another machine.
 
 Without `make`:
 
@@ -36,7 +39,7 @@ Without `make`:
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e "backend[dev]"
 (cd web && npm ci && npm run build)
-ezra-udp serve --open
+ezra-udp serve --open          # add --mock to get the built-in mock robot
 ```
 
 ## Connecting to the robot
@@ -83,6 +86,7 @@ ezra-udp listen -s 10                             # heartbeat + print reports, t
 ezra-udp suite --allow-caution --json report.json # conformance run
 ezra-udp decode "eb 91 eb 90 59 00 07 00 01 00 01 00 00 00 00 00 7b 22 ..."
 ezra-udp mock --faults --loss 0.05                # fake robot with fault injection and 5 % packet loss
+ezra-udp serve --mock                             # GUI + API + mock robot in one process
 ```
 
 ## Development
