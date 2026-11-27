@@ -1,6 +1,7 @@
 """ezra-udp — EZRA UDP Debugger command line.
 
     ezra-udp serve                       # API + GUI on http://127.0.0.1:8765
+    ezra-udp serve --mock                # same, plus a fake robot in the same process
     ezra-udp mock                        # fake robot on 127.0.0.1 (udp 30000 / dtls 30004 / tcp 30001 / tls 30003)
     ezra-udp list                        # every command in the docs
     ezra-udp send heartbeat -t dtls --host 10.21.33.103
@@ -236,7 +237,10 @@ def cmd_serve(a) -> int:
     from .server import create_app, default_web_dir
 
     web = None if a.no_web else (Path(a.web) if a.web else default_web_dir())
-    app = create_app(web)
+    mock = None
+    if a.mock or a.mock_faults:
+        mock = dict(host="127.0.0.1", faults=a.mock_faults, verbose=not a.mock_quiet)
+    app = create_app(web, mock=mock)
     url = f"http://{'127.0.0.1' if a.host in ('0.0.0.0', '::') else a.host}:{a.port}"
     print(f"EZRA UDP Debugger {__version__}  →  {url}")
     print(f"  GUI: {web if web else 'not built (cd web && npm run build) — API only'}")
@@ -258,6 +262,10 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--no-web", action="store_true")
     sp.add_argument("--open", action="store_true", help="open the browser")
     sp.add_argument("--log-level", default="warning")
+    sp.add_argument("--mock", action="store_true",
+                    help="also run the mock robot in this process (udp 30000, dtls 30004, tcp 30001, tls 30003)")
+    sp.add_argument("--mock-faults", action="store_true", help="--mock with a fault injected every 15 s")
+    sp.add_argument("--mock-quiet", action="store_true", help="do not print mock robot request logs")
     sp.set_defaults(fn=cmd_serve)
 
     sp = sub.add_parser("mock", help="run a fake robot for local testing")
