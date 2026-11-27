@@ -208,6 +208,7 @@ dengan panduan di Lampiran~\ref{app:ros2}.
 \textbf{Perlu apa} & \textbf{Perintah (di folder repo)}\\\midrule
 Install (sekali, butuh internet) & \code{make setup}\\
 Coba semua fitur tanpa robot & \code{make demo} \ra{} preset \ui{Mock · DTLS} \ra{} \ui{Connect}\\
+Cek otomatis semuanya (tanpa robot) & \code{make smoke} \ra{} harus selesai dengan \code{smoke test passed}\\
 GUI ke robot & \code{make run} \ra{} \code{http://127.0.0.1:8765}\\
 Robot jawab di mode/port mana? & \code{make probe} atau \code{ezra-udp probe -{}-host 10.21.33.103}\\
 Uji otomatis dari terminal & \code{ezra-udp suite -t dtls -{}-host 10.21.33.103 -{}-allow-caution}\\
@@ -244,6 +245,9 @@ GUI ikut dibundel, tidak ada CDN. Di pabrik cukup \code{make serve} atau \code{m
 \item Tab \ui{Test run}: \ui{Probe} ke \code{127.0.0.1} --- DTLS, TLS, UDP 30000 dan TCP 30001 \code{ok}.
 \item Centang semua check \emph{safe} + \emph{caution}, \ui{Run} --- semua \code{pass}.
 \end{enumerate}
+Versi otomatisnya: \code{make smoke}. Perintah ini menjalankan GUI + API + mock robot lalu mengetes keempat
+transport, JSON dan XML, heartbeat, dan kelima report dalam $\pm$5 detik. Hasilnya harus \code{smoke test passed}.
+
 Kalau langkah ini lancar, laptop siap; masalah di pabrik berarti ada di jaringan atau konfigurasi robot.
 
 \subsection{Barang bawaan}
@@ -872,7 +876,7 @@ DTLS handshake timeout & Port salah atau enkripsi dimatikan --- jalankan probe; 
 ``\emph{certificate problem}'' & Matikan verify, isi CA, atau minta sertifikat/kunci klien ke Deep Robotics.\\
 ``\emph{protocol/cipher mismatch}'' & Aktifkan \ui{Compat mode} (\code{-{}-compat}), coba lagi, lalu catat versi TLS robot.\\
 HB acked 0, tapi terkoneksi (UDP) & Mode salah (UDP ke port DTLS), robot membalas dari port lain (matikan \emph{Connected UDP socket}), atau firewall Mac.\\
-HB OK tapi \ui{No reports} & Ada klien lain yang mengirim heartbeat ke robot (report pindah ke sana); hentikan klien lain.\\
+HB OK tapi \ui{No reports} & Report dikirim robot dari port lain: matikan \emph{Connected UDP socket}. Atau ada klien lain yang juga mengirim heartbeat (report pindah ke sana): hentikan klien lain.\\
 \ui{Link lost} merah & Robot reboot, kabel/Wi-Fi putus, atau sesi DTLS direset --- \ui{Disconnect} lalu \ui{Connect}.\\
 Rate report rendah & CPU robot sibuk (lihat Monitor), Wi-Fi lemah, atau paket hilang (UDP). Coba kabel.\\
 \code{E006 Mismatched request client} & Klien lain mengirim axis dalam 2 detik terakhir; pakai satu klien saja.\\
@@ -1099,10 +1103,13 @@ backend/drds_udp/
   server/     FastAPI REST + WebSocket, menyajikan web/out (+ mock robot opsional)
   mock/       robot tiruan (semua command, 5 report, device state multi-packet, nav task)
 web/          GUI Next.js (static export)
+scripts/      smoke.py: cek end-to-end untuk make smoke dan CI
 docs/         ROS2_TOPIC_DEBUG.md, PROTOCOL_NOTES.md, manual/ (dokumen ini)
-.github/      CI: test backend (Ubuntu + macOS), build GUI, build manual PDF
+.github/      CI: test backend (Ubuntu + macOS), build GUI + smoke, build manual PDF
 \end{lstlisting}
-Setiap push dan PR menjalankan CI: \code{pytest} (unit + end-to-end di keempat transport), smoke test CLI terhadap
-mock (\code{probe} + \code{suite}), typecheck + build GUI, dan build PDF manual ini sebagai artifact.
+Setiap push dan PR menjalankan CI (\code{.github/workflows/ci.yml}): \code{pytest} di Ubuntu dan macOS dengan
+Python 3.10 dan 3.13 (unit + end-to-end di keempat transport), CLI terhadap mock (\code{probe} + \code{suite} di
+keempat transport), build + typecheck GUI, lalu \code{scripts/smoke.py -{}-gui}. Workflow \code{manual.yml}
+membangun ulang PDF ini setiap kali \code{docs/manual/} berubah dan menyimpannya sebagai artifact.
 
 \end{document}
