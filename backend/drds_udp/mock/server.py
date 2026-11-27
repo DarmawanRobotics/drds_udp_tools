@@ -85,7 +85,8 @@ class MockClient:
 class MockRobot:
     def __init__(self, host: str = "127.0.0.1", udp_port: int | None = 30000, dtls_port: int | None = 30004,
                  tcp_port: int | None = 30001, tls_port: int | None = 30003, version: str = "PRO",
-                 sdk_unlocked: bool = False, faults: bool = False, loss: float = 0.0, verbose: bool = True) -> None:
+                 sdk_unlocked: bool = False, faults: bool = False, loss: float = 0.0, verbose: bool = True,
+                 require_client_cert: bool = False) -> None:
         self.host = host
         self.ports = {"udp": udp_port, "dtls": dtls_port, "tcp": tcp_port, "tls": tls_port}
         self.sim = RobotSim(version=version, sdk_unlocked=sdk_unlocked, faults=faults)
@@ -96,6 +97,10 @@ class MockRobot:
         self._tasks: list[asyncio.Task] = []
         self._certdir = tempfile.TemporaryDirectory(prefix="ezra-mock-")
         self.cert_file, self.key_file = _make_self_signed(Path(self._certdir.name))
+        # like the real robot: DTLS/TLS only talk to clients with a certificate signed by this CA
+        self.client_ca_file = self.client_cert_file = self.client_key_file = None
+        if require_client_cert:
+            self.client_ca_file, self.client_cert_file, self.client_key_file = _make_client_ca(Path(self._certdir.name))
         self.bound: dict[str, int] = {}
 
     # ---------------------------------------------------------------- core
@@ -184,6 +189,9 @@ class MockRobot:
         if self.ports["tls"] is not None:
             sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             sctx.load_cert_chain(self.cert_file, self.key_file)
+            if self.client_ca_file:
+                sctx.verify_mode = ssl.CERT_REQUIRED
+                sctx.load_verify_locations(self.client_ca_file)
             srv = await self._bind("tls", lambda: asyncio.start_server(
                 lambda r, w: self._stream_client("tls", r, w), self.host, self.ports["tls"], ssl=sctx))
             self.bound["tls"] = srv.sockets[0].getsockname()[1]
@@ -246,6 +254,9 @@ class _DtlsPeer:
         from ..transport.tlsconf import make_dtls_context
 
         ctx = make_dtls_context(TlsOptions(cert_file=robot.cert_file, key_file=robot.key_file), server=True)
+        if robot.client_ca_file:
+            ctx.set_verify(SSL.VERIFY_PEER | SSL.VERIFY_FAIL_IF_NO_PEER_CERT, lambda conn, cert, err, depth, ok: bool(ok))
+            ctx.load_verify_locations(robot.client_ca_file)
         self.conn = SSL.Connection(ctx, None)
         self.conn.set_accept_state()
         try:
@@ -348,12 +359,49 @@ def _make_self_signed(directory: Path) -> tuple[str, str]:
     return str(cert_path), str(key_path)
 
 
+def _make_client_ca(directory: Path) -> tuple[str, str, str]:
+    """A CA plus a client certificate/key signed by it, for a mock that requires mutual TLS."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    now = dt.datetime.now(dt.timezone.utc)
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ezra-mock-client-ca")])
+    ca = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name).public_key(ca_key.public_key())
+          .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
+          .not_valid_after(now + dt.timedelta(days=30))
+          .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+          .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True, content_commitment=False,
+                                       key_encipherment=False, data_encipherment=False, key_agreement=False,
+                                       encipher_only=False, decipher_only=False), critical=True)
+          .sign(ca_key, hashes.SHA256()))
+    key = ec.generate_private_key(ec.SECP256R1())
+    cert = (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ezra-mock-client")]))
+            .issuer_name(ca_name).public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=30))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+            .sign(ca_key, hashes.SHA256()))
+    paths = directory / "client-ca.pem", directory / "client-cert.pem", directory / "client-key.pem"
+    paths[0].write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+    paths[1].write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    paths[2].write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+    return str(paths[0]), str(paths[1]), str(paths[2])
+
+
 async def run_mock(**kw) -> None:
     robot = MockRobot(**kw)
     await robot.start()
     ports = ", ".join(f"{k.upper()}:{v}" for k, v in robot.bound.items())
     print(f"[mock] EZRA mock robot ({robot.sim.version}) listening on {robot.host} — {ports}", flush=True)
     print("[mock] reports start once a client sends heartbeat (Type 1048676 / Command 5) at >= 1 Hz", flush=True)
+    if robot.client_cert_file:
+        print(f"[mock] DTLS/TLS require a client certificate — use --cert {robot.client_cert_file} "
+              f"--key {robot.client_key_file}", flush=True)
     try:
         await asyncio.Event().wait()
     finally:

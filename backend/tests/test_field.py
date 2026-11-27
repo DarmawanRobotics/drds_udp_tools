@@ -164,3 +164,34 @@ def test_serve_refuses_a_busy_port(capsys):
         taken.close()
     assert rc == 1
     assert f"port {port} is already in use" in capsys.readouterr().err
+
+
+def test_hints_for_what_the_factory_robot_answered():
+    from drds_udp.transport.tlsconf import handshake_hint
+
+    dtls = handshake_hint("SSL routines:tls alert handshake failure", "dtls")
+    assert "client certificate" in dtls and "compat" in dtls
+    assert "client certificate" not in handshake_hint("SSL routines:tls alert handshake failure", "dtls", client_cert=True)
+    tls13 = handshake_hint("[SSL: TLSV13_ALERT_CERTIFICATE_REQUIRED] tlsv13 alert certificate required", "tls")
+    assert "client certificate" in tls13
+    assert "rejected our client certificate" in handshake_hint("tlsv1 alert unknown ca", "tls", client_cert=True)
+
+
+def test_probe_explains_and_passes_a_required_client_certificate():
+    async def main():
+        robot = _mock(require_client_cert=True)
+        await robot.start()
+        b = robot.bound
+        cands = [("dtls", b["dtls"]), ("tls", b["tls"])]
+        try:
+            bare = await probe("127.0.0.1", cands, timeout=2.0)
+            with_cert = await probe("127.0.0.1", cands, timeout=2.0,
+                                    tls=TlsOptions(cert_file=robot.client_cert_file, key_file=robot.client_key_file))
+        finally:
+            await robot.stop()
+        for r in bare["results"]:
+            assert r["status"] == "handshake_failed" and "client certificate" in r["detail"], r
+        assert [r["status"] for r in with_cert["results"]] == ["ok", "ok"], with_cert["results"]
+        assert with_cert["best"]["transport"] == "dtls"
+
+    asyncio.run(main())

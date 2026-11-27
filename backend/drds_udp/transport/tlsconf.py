@@ -11,20 +11,35 @@ COMPAT_CIPHERS = "DEFAULT:@SECLEVEL=0"
 _PLAIN_PEER = ("wrong version number", "record layer failure", "packet length too long", "unexpected record",
                "http request", "record_layer_failure", "bad record", "decode error", "unexpected message")
 _POLICY = ("unsupported protocol", "protocol version", "no protocols available", "no ciphers available",
-           "handshake failure", "insufficient security", "dh key too small", "ee key too small", "ca md too weak")
-_CERT = ("certificate verify failed", "certificate required", "peer did not return a certificate",
-         "unknown ca", "bad certificate")
+           "insufficient security", "dh key too small", "ee key too small", "ca md too weak")
+_CLIENT_CERT_MISSING = ("certificate required", "peer did not return a certificate")
+_CLIENT_CERT_REJECTED = ("unknown ca", "bad certificate", "certificate unknown", "unsupported certificate",
+                         "certificate expired", "certificate revoked", "access denied")
+_VERIFY_FAILED = ("certificate verify failed",)
+
+CLIENT_CERT_HINT = ("the robot requires a client certificate (mutual TLS): set Client certificate + key in the "
+                    "connection settings (CLI: --cert/--key) — the files come from Deep Robotics")
 
 
-def handshake_hint(text: str, plain_name: str) -> str:
-    """Turn an OpenSSL error into the next thing to try in the field."""
+def handshake_hint(text: str, plain_name: str, client_cert: bool = False) -> str:
+    """Turn an OpenSSL error into the next thing to try in the field.
+
+    `client_cert`: whether we presented a client certificate (changes what a bare "handshake failure" means).
+    """
     t = text.lower()
-    if any(k in t for k in _CERT):
-        return (" — certificate problem: turn certificate verification off, set the CA file, or provide the client "
-                "certificate/key the robot expects")
+    if any(k in t for k in _CLIENT_CERT_MISSING):
+        return f" — {CLIENT_CERT_HINT}"
+    if any(k in t for k in _VERIFY_FAILED):
+        return " — the robot's certificate did not verify: turn certificate verification off or set the right CA file"
+    if client_cert and any(k in t for k in _CLIENT_CERT_REJECTED):
+        return " — the robot rejected our client certificate: check that cert and key are the pair Deep Robotics gave you"
     if any(k in t for k in _PLAIN_PEER):
         return f" — the port answered with something that is not {plain_name.upper()}-encrypted: it is probably a plain port"
-    if any(k in t for k in _POLICY):
+    if "handshake failure" in t and not client_cert:
+        # DTLS 1.2 / TLS 1.2 servers send a bare handshake_failure alert when a required client cert is missing
+        return (f" — {CLIENT_CERT_HINT}; if it still fails with the certificate, enable compat mode "
+                "(old TLS/DTLS versions, weak ciphers)")
+    if "handshake failure" in t or any(k in t for k in _POLICY):
         return " — protocol/cipher mismatch: enable compat mode (old TLS/DTLS versions, weak ciphers) and retry"
     return ""
 

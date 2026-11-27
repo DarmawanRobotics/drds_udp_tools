@@ -105,7 +105,9 @@ async def probe_one(host: str, kind: str, port: int, timeout: float = 2.5, tls: 
             if any("ICMP port unreachable" in m for m in logs):
                 out.update(status="refused", detail="ICMP port unreachable — nothing listens on this UDP port")
             elif session.state == "error" and session.error:
-                out.update(status="no_reply", detail=f"connection closed: {session.error}")
+                err = session.error.lower()
+                status = "handshake_failed" if ("certificate" in err or "alert" in err) else "no_reply"
+                out.update(status=status, detail=f"connection closed: {session.error}")
             else:
                 out.update(status="no_reply",
                            detail="sent a heartbeat, no answer" + (" (UDP: wrong mode/port, or replies from another port)"

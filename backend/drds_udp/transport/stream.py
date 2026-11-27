@@ -38,7 +38,8 @@ class StreamTransport(Transport):
             raise TransportError(f"{self.kind.upper()} connect timeout to {self.cfg.host}:{self.cfg.port}") from exc
         except ssl.SSLError as exc:
             text = f"{exc.reason or ''} {exc}".strip()
-            raise TransportError(f"TLS handshake failed: {exc.reason or exc}{handshake_hint(text, 'tls')}") from exc
+            hint = handshake_hint(text, "tls", bool(self.cfg.tls.cert_file))
+            raise TransportError(f"TLS handshake failed: {exc.reason or exc}{hint}") from exc
         except OSError as exc:
             raise TransportError(f"{self.kind.upper()} connect to {self.cfg.host}:{self.cfg.port} failed: {exc}") from exc
         self.local_addr = self._writer.get_extra_info("sockname")
@@ -71,10 +72,17 @@ class StreamTransport(Transport):
             return
         except (ConnectionError, ssl.SSLError, OSError) as exc:
             reason = f"connection error: {exc}"
+            if self.kind == "tls" and isinstance(exc, ssl.SSLError):
+                # TLS 1.3: a missing client certificate is reported after the handshake, on the first read
+                reason += handshake_hint(f"{exc.reason or ''} {exc}", "tls", bool(self.cfg.tls.cert_file))
         if self.kind == "tcp" and self.first_bytes[:1] in (b"\x15", b"\x16") and self.first_bytes[1:2] == b"\x03":
             reason += " — the robot answered with a TLS record: this port expects TLS, not plain TCP"
         elif self.kind == "tcp" and self.bytes_in == 0 and self.bytes_out > 0:
             reason += " — closed without replying to our first packet: the port probably expects TLS (try TLS mode)"
+        elif (self.kind == "tls" and self.bytes_in == 0 and self.bytes_out > 0 and not self.cfg.tls.cert_file
+              and "client certificate" not in reason):
+            reason += (" — closed right after the TLS handshake without a reply: the robot may require a client "
+                       "certificate (mutual TLS) — set Client certificate + key (CLI: --cert/--key)")
         if not self._closing:
             self.on_closed(reason)
 
