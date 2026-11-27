@@ -78,7 +78,16 @@ export const DEFAULT_CONN: ConnectConfig = {
   connect_timeout: 5,
   udp_connect: true,
   auto_split: true,
-  tls: { verify: false, ca_file: null, cert_file: null, key_file: null, ciphers: null, server_name: null, dtls_mtu: 1400 },
+  tls: {
+    verify: false,
+    ca_file: null,
+    cert_file: null,
+    key_file: null,
+    ciphers: null,
+    server_name: null,
+    dtls_mtu: 1400,
+    compat: false,
+  },
 };
 
 function load<T>(key: string, fallback: T): T {
