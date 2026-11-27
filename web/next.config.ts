@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   images: { unoptimized: true },
   devIndicators: false,
+  // pin the root to web/ so lockfiles in parent folders (e.g. ~/pnpm-lock.yaml) are not considered
+  turbopack: { root: __dirname },
 };
 
 export default nextConfig;
