@@ -489,7 +489,7 @@ export function Monitor() {
     return (
       <Empty title="Connect to see live status" icon={<Gauge size={26} />}>
         The robot pushes five reports (Basic 2 Hz, Motion 10 Hz, Device 2 Hz, Abnormal 2 Hz, Navigation 1 Hz) to whoever sends
-        it heartbeats. Connect in the top bar — or run <code className="font-mono">ezra-udp mock</code> and pick a Mock preset.
+        it heartbeats. Connect in the top bar — or run <code className="font-mono">make demo</code> and pick a Mock preset.
       </Empty>
     );
   }
