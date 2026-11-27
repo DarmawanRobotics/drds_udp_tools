@@ -1,0 +1,282 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ tokens
+   "Control cabinet": RAL 7035 enclosure grey, signal yellow, e-stop red,
+   indicator-lamp green, TX sky blue, RX busbar copper. */
+:root {
+  --cabinet: #dfe2dd;
+  --panel: #f5f6f2;
+  --well: #ebede8;
+  --ink: #1c221e;
+  --muted: #5c655f;
+  --faint: #8a928c;
+  --line: #c4c9c2;
+  --line-strong: #a9afa8;
+
+  --signal: #f2a900;
+  --signal-ink: #5a3f00;
+  --estop: #c8201a;
+  --lamp: #1f8a55;
+  --tx: #1f6fb2;
+  --rx: #b2622a;
+  --warn: #b77400;
+  --bad: #c0281f;
+
+  /* byte ribbon: sync / length / msg id / format / seq / version / reserved */
+  --b-sync: #2b322e;
+  --b-len: #1f6fb2;
+  --b-id: #6a4fb0;
+  --b-fmt: #138a86;
+  --b-seq: #b2622a;
+  --b-ver: #6f7b2c;
+  --b-res: #9ba39c;
+
+  --shadow-hard: 0 1px 0 rgb(255 255 255 / 0.7) inset, 0 1px 2px rgb(28 34 30 / 0.12);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --cabinet: #151916;
+  --panel: #1d221f;
+  --well: #242a26;
+  --ink: #e4e8e2;
+  --muted: #98a29b;
+  --faint: #6c7570;
+  --line: #313833;
+  --line-strong: #444c47;
+
+  --signal: #f5b417;
+  --signal-ink: #2b1f00;
+  --estop: #e0352d;
+  --lamp: #35b373;
+  --tx: #4e9be0;
+  --rx: #d9824a;
+  --warn: #e0a33a;
+  --bad: #f0554b;
+
+  --b-sync: #59625c;
+  --b-len: #2f7cc0;
+  --b-id: #7d63c4;
+  --b-fmt: #1f9b96;
+  --b-seq: #c4733a;
+  --b-ver: #808d3a;
+  --b-res: #4f5852;
+
+  --shadow-hard: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 1px 2px rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-cabinet: var(--cabinet);
+  --color-panel: var(--panel);
+  --color-well: var(--well);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-estop: var(--estop);
+  --color-lamp: var(--lamp);
+  --color-tx: var(--tx);
+  --color-rx: var(--rx);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --font-sans: "Barlow", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-cond: "Barlow Semi Condensed", "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Martian Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-mono--font-variation-settings: "wdth" 87.5;
+}
+
+/* ------------------------------------------------------------------- base */
+@layer base {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--cabinet);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "tnum" 1;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--signal) 45%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--tx);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* thin, quiet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* number fields: no spinners, they eat the space digits need */
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+/* -------------------------------------------------------------- components
+   In @layer components so Tailwind utilities (later layer) can override them. */
+@layer components {
+  .field {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 9px;
+    min-height: 32px;
+    outline: none;
+    transition: border-color 0.12s;
+  }
+  .field:hover {
+    border-color: var(--line-strong);
+  }
+  .field:focus {
+    border-color: var(--tx);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--tx) 18%, transparent);
+  }
+  .field:disabled {
+    opacity: 0.6;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 6px;
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
+    box-shadow: var(--shadow-hard);
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s, transform 0.05s;
+  }
+  .btn:hover:not(:disabled) {
+    border-color: var(--ink);
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--tx);
+    border-color: color-mix(in oklab, var(--tx) 70%, black);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--tx) 50%, black);
+    background: color-mix(in oklab, var(--tx) 90%, black);
+  }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--well);
+    border-color: transparent;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  /* hazard edge for commands that move the robot */
+  .hazard {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--signal) 0 6px,
+      var(--ink) 6px 12px
+    );
+  }
+
+  .lamp {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--faint);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--faint) 25%, transparent);
+    flex: none;
+  }
+  .lamp[data-on="ok"] {
+    background: var(--lamp);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--lamp) 25%, transparent), 0 0 8px var(--lamp);
+  }
+  .lamp[data-on="warn"] {
+    background: var(--signal);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--signal) 25%, transparent), 0 0 8px var(--signal);
+  }
+  .lamp[data-on="bad"] {
+    background: var(--estop);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--estop) 25%, transparent), 0 0 8px var(--estop);
+  }
+
+  @keyframes blink {
+    0% { opacity: 1; }
+    100% { opacity: 0.35; }
+  }
+  .lamp-beat {
+    animation: blink 0.45s ease-out forwards;
+  }
+
+  /* JSON syntax colors */
+  .j-key { color: var(--ink); }
+  .j-str { color: var(--rx); }
+  .j-num { color: var(--tx); }
+  .j-bool { color: var(--b-id); }
+  .j-null { color: var(--faint); }
+  .j-note {
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    margin-left: 8px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--well);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
